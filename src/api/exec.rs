@@ -1,6 +1,6 @@
 //! Run new commands inside running containers.
 
-use hyper::Body;
+use reqwest::Body;
 
 use crate::{
     conn::{tty, Headers, Payload},

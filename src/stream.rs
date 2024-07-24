@@ -1,7 +1,7 @@
 use containers_api::conn::tty;
 use containers_api::conn::Payload;
 use futures_util::{AsyncRead, AsyncWrite};
-use hyper::Body;
+use reqwest::Body;
 
 use crate::{Docker, Result};
 

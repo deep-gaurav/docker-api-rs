@@ -2,11 +2,12 @@
 //!
 //! API Reference: <https://docs.docker.com/engine/api/v1.42/>
 use crate::{
-    conn::{get_http_connector, Headers, Payload, Transport},
+    conn::{ Headers, Payload, Transport},
     errors::{Error, Result},
     ApiVersion, Containers, Images, Networks, Volumes,
 };
 use containers_api::conn::RequestClient;
+use reqwest::{Body, Response};
 
 #[cfg(feature = "swarm")]
 use crate::{Configs, Nodes, Plugins, Secrets, Services, Swarm, Tasks};
@@ -14,13 +15,13 @@ use crate::{Configs, Nodes, Plugins, Secrets, Services, Swarm, Tasks};
 #[cfg(feature = "tls")]
 use crate::conn::get_https_connector;
 #[cfg(unix)]
-use crate::conn::get_unix_connector;
+// use crate::conn::get_unix_connector;
 
 use futures_util::{
     io::{AsyncRead, AsyncWrite},
     stream::Stream,
 };
-use hyper::{body::Bytes, Body, Client, Response};
+use hyper::{body::Bytes};
 use serde::de::DeserializeOwned;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -105,14 +106,20 @@ impl Docker {
 
     #[cfg(unix)]
     fn new_unix_impl(socket_path: impl Into<PathBuf>, version: Option<ApiVersion>) -> Self {
+        let buf:PathBuf = socket_path.into();
+        let proxy_url = format!("unix://{}",buf.as_path().to_str().unwrap_or_default());
+        println!("Proxy Url {proxy_url}");
+        let proxy = reqwest::Proxy::http(&proxy_url).expect("Cant create reqwest proxy");
+
         Docker {
             version,
             client: RequestClient::new(
                 Transport::Unix {
-                    client: Client::builder()
-                        .pool_max_idle_per_host(0)
-                        .build(get_unix_connector()),
-                    path: socket_path.into(),
+                    client: reqwest::Client::builder()
+                    .proxy(proxy)
+                    .connection_verbose(true)
+                    .build().unwrap(),
+                    path: buf,
                 },
                 Box::new(validate_response),
             ),
@@ -198,8 +205,8 @@ impl Docker {
             version,
             client: RequestClient::new(
                 Transport::Tcp {
-                    client: Client::builder().build(get_http_connector()),
-                    host: url::Url::parse(&format!("tcp://{host}")).map_err(Error::InvalidUrl)?,
+                    client: reqwest::Client::builder().build().unwrap(),
+                    host: url::Url::parse(&format!("http://{host}")).map_err(Error::InvalidUrl)?,
                 },
                 Box::new(validate_response),
             ),
@@ -255,7 +262,7 @@ impl Docker {
         }
     }
 
-    pub(crate) async fn get(&self, endpoint: &str) -> Result<Response<Body>> {
+    pub(crate) async fn get(&self, endpoint: &str) -> Result<Response> {
         self.client.get(self.make_endpoint(endpoint)).await
     }
 
@@ -269,9 +276,9 @@ impl Docker {
         endpoint: &str,
         body: Payload<B>,
         headers: Option<Headers>,
-    ) -> Result<Response<Body>>
+    ) -> Result<Response>
     where
-        B: Into<Body>,
+        B: Into<reqwest::Body>,
     {
         self.client
             .post(self.make_endpoint(endpoint), body, headers)
@@ -285,7 +292,7 @@ impl Docker {
         headers: Option<Headers>,
     ) -> Result<String>
     where
-        B: Into<Body>,
+        B: Into<reqwest::Body>,
     {
         self.client
             .post_string(self.make_endpoint(endpoint), body, headers)
@@ -300,7 +307,7 @@ impl Docker {
     ) -> Result<T>
     where
         T: DeserializeOwned,
-        B: Into<Body>,
+        B: Into<reqwest::Body>,
     {
         self.client
             .post_json(self.make_endpoint(endpoint), body, headers)
@@ -326,7 +333,7 @@ impl Docker {
         self.client.delete_json(self.make_endpoint(endpoint)).await
     }
 
-    pub(crate) async fn head(&self, endpoint: &str) -> Result<Response<Body>> {
+    pub(crate) async fn head(&self, endpoint: &str) -> Result<Response> {
         self.client.head(self.make_endpoint(endpoint)).await
     }
 
@@ -385,8 +392,8 @@ impl Docker {
 }
 
 fn validate_response(
-    response: Response<Body>,
-) -> Pin<Box<dyn Future<Output = Result<Response<Body>>> + Send + Sync>> {
+    response: reqwest::Response,
+) -> Pin<Box<dyn Future<Output = Result<reqwest::Response>> + Send + Sync>> {
     use serde::{Deserialize, Serialize};
     #[derive(Serialize, Deserialize)]
     struct ErrorResponse {
@@ -410,8 +417,8 @@ fn validate_response(
             | StatusCode::NO_CONTENT => Ok(response),
             // Error case: try to deserialize error message
             _ => {
-                let body = response.into_body();
-                let bytes = hyper::body::to_bytes(body)
+                // let body = response.into_body();
+                let bytes = response.bytes()
                     .await
                     .map_err(conn::Error::from)?;
                 let message_body = String::from_utf8(bytes.to_vec()).map_err(conn::Error::from)?;

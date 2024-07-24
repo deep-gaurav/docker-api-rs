@@ -8,7 +8,7 @@ use crate::{models, stream};
 use std::{io, path::Path, str};
 
 use futures_util::{Stream, TryStreamExt};
-use hyper::Body;
+use reqwest::Body;
 use serde::Deserialize;
 
 use crate::{
