@@ -8,8 +8,10 @@ use crate::{
     },
 };
 
-use std::io::Read;
+use std::{error::Error, io::Read};
 
+use bytes::Bytes;
+use futures::TryStream;
 use futures_util::{stream::Stream, TryFutureExt, TryStreamExt};
 
 use containers_api::{
@@ -246,6 +248,35 @@ impl Images {
             .try_flatten_stream(),
         )
     }}
+
+    api_doc! { Image => Load
+        |
+        /// Imports an image or set of images from a given tarball source.
+        /// Source can be uncompressed on compressed via gzip, bzip2 or xz.
+        pub fn import_from_stream<'docker, R>(
+            &'docker self,
+            tarball: R,
+        ) -> impl Stream<Item = Result<models::ImageBuildChunk>> + Unpin + 'docker
+        where
+            R: TryStream + Send + Sync + 'static,
+            R::Error: Into<Box<dyn Error + Send + Sync>>,
+            Bytes: From<R::Ok>,
+        {
+            let body = reqwest::Body::wrap_stream(tarball);
+            Box::pin(
+                async move {
+    
+                    let value_stream = self.docker.post_into_stream(
+                        "/images/load",
+                        Payload::Tar(body),
+                        Headers::none(),
+                    );
+                    Ok(value_stream)
+                }
+                .try_flatten_stream(),
+            )
+        }}
+    
 
     api_doc! { Image => Push
     |
