@@ -108,7 +108,6 @@ impl Docker {
     fn new_unix_impl(socket_path: impl Into<PathBuf>, version: Option<ApiVersion>) -> Self {
         let buf:PathBuf = socket_path.into();
         let proxy_url = format!("unix://{}",buf.as_path().to_str().unwrap_or_default());
-        println!("Proxy Url {proxy_url}");
         let proxy = reqwest::Proxy::http(&proxy_url).expect("Cant create reqwest proxy");
 
         Docker {
